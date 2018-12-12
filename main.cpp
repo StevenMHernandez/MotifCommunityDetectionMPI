@@ -11,6 +11,7 @@
 #include <vector>
 #include <mpi.h>
 #include "generatePoints.h"
+#include "buildDissimilarityMatrix.h"
 
 int main(int argc, char *argv[]) {
     Config config;
@@ -29,6 +30,15 @@ int main(int argc, char *argv[]) {
 
         /// Generate Points in Euclidean Space to use
         generatePoints(points, config.POINTS_TO_CREATE, config);
+
+        /// Create Dissimilarty matrix at time t=1
+        config.DISTANCE_THRESHOLD = 1;
+        double **L_t1 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
+
+        /// Create Dissimilarty matrix at time t=2
+        config.DISTANCE_THRESHOLD = 0.5;
+        double **L_t2 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
+
         clock_gettime(CLOCK_MONOTONIC_RAW, &start);
 
         /// Create Communities data structure
