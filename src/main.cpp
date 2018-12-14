@@ -12,9 +12,10 @@
 #include <mpi.h>
 #include "generatePoints.h"
 #include "buildDissimilarityMatrix.h"
+#include "collectMotifTransitions.h"
 
 int main(int argc, char *argv[]) {
-    Config config;
+    Config config = Config();
 
     int rank = 0, total_tasks = -1;
 //    MPI_Init(&argc, &argv);
@@ -32,11 +33,11 @@ int main(int argc, char *argv[]) {
         generatePoints(points, config.POINTS_TO_CREATE, config);
 
         /// Create Dissimilarty matrix at time t=1
-        config.DISTANCE_THRESHOLD = 1;
+        config.DISTANCE_THRESHOLD = 100;
         double **L_t1 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
 
         /// Create Dissimilarty matrix at time t=2
-        config.DISTANCE_THRESHOLD = 0.5;
+        config.DISTANCE_THRESHOLD = 50;
         double **L_t2 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
 
         clock_gettime(CLOCK_MONOTONIC_RAW, &start);
@@ -46,7 +47,8 @@ int main(int argc, char *argv[]) {
         C.resize(static_cast<unsigned long>(config.POINTS_TO_CREATE), std::set<int>());
 
         clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationStart);
-        printf("TODO: run optimization algorithm\n");
+        int **T = collectMotifTransitions(L_t1, L_t2, config);
+//        predictCommunities(T, t1, t2, config);
         clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationEnd);
 
         if (config.__PRINT_TIME_TAKEN__) {
