@@ -5,7 +5,7 @@ class Config {
 public:
     int    K = 3;
     double DISTANCE_THRESHOLD = 10;
-    int    POINTS_TO_CREATE = 500;
+    int    POINTS_TO_CREATE = 100;
     int    RAND_POINT_MAX = 100;
     int    TOTAL_PROCESSORS = -1;
     int    RANK = -1;
