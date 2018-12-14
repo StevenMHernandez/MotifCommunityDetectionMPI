@@ -16,50 +16,56 @@
 
 int main(int argc, char *argv[]) {
     Config config = Config();
+    struct timespec start, end, optimizationStart, optimizationEnd;
 
     int rank = 0, total_tasks = -1;
-//    MPI_Init(&argc, &argv);
-//    MPI_Comm_size(MPI_COMM_WORLD, &total_tasks);
-//    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-//    MPI_Status stat;
-    if (rank == 0) { // TODO: remove!
-        srandom(rank);
 
-        double *points = (double *) malloc(config.POINTS_TO_CREATE * 2 * sizeof(double));
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &total_tasks);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Status stat;
 
-        struct timespec start, end, optimizationStart, optimizationEnd;
+    config.TOTAL_PROCESSORS = total_tasks;
+    config.RANK = rank;
+    srandom(static_cast<unsigned int>(rank));
 
+    double *points = (double *) malloc(config.POINTS_TO_CREATE * 2 * sizeof(double));
+
+    if (rank == 0) {
+        clock_gettime(CLOCK_MONOTONIC_RAW, &start);
         /// Generate Points in Euclidean Space to use
         generatePoints(points, config.POINTS_TO_CREATE, config);
+    }
 
-        /// Create Dissimilarty matrix at time t=1
-        config.DISTANCE_THRESHOLD = 100;
-        double **L_t1 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
+    MPI_Bcast(points,config.POINTS_TO_CREATE, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-        /// Create Dissimilarty matrix at time t=2
-        config.DISTANCE_THRESHOLD = 50;
-        double **L_t2 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
+    /// For simplicity, we will simply generate L_t1 and L_t2 per process
+    /// However, this could easily be run in parallel as well!
 
-        clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+    /// Create Dissimilarty matrix at time t=1
+    config.DISTANCE_THRESHOLD = 100;
+    double **L_t1 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
 
-        /// Create Communities data structure
-        std::vector<std::set<int> > C;
-        C.resize(static_cast<unsigned long>(config.POINTS_TO_CREATE), std::set<int>());
+    /// Create Dissimilarty matrix at time t=2
+    config.DISTANCE_THRESHOLD = 50;
+    double **L_t2 = buildDissimilarityMatrix(points, config.POINTS_TO_CREATE, config);
 
-        clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationStart);
-        int **T = collectMotifTransitions(L_t1, L_t2, config);
-//        predictCommunities(T, t1, t2, config);
-        clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationEnd);
+    /// Create Communities data structure
+    std::vector<std::set<int> > C;
+    C.resize(static_cast<unsigned long>(config.POINTS_TO_CREATE), std::set<int>());
 
-        if (config.__PRINT_TIME_TAKEN__) {
-            clock_gettime(CLOCK_MONOTONIC_RAW, &end);
-            //* Print the time take for the given number of processors used and number of cities total
-            //* Format: "identifier,num processors,num cities,time(ms)"
-            printf("time_taken_ms,%i,%lf\n", total_tasks, (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6);
-            printf("optimization_time_taken_ms,%i,%lf\n", total_tasks, (1000000000L * (optimizationEnd.tv_sec - optimizationStart.tv_sec) + optimizationEnd.tv_nsec - optimizationStart.tv_nsec) / 1e6);
-        }
-    } // TODO: endRemove!
+    clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationStart);
+    int **T = collectMotifTransitions(L_t1, L_t2, config);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationEnd);
 
-//    MPI_Finalize();
+    if (rank == 0 && config.__PRINT_TIME_TAKEN__) {
+        clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+        //* Print the time take for the given number of processors used and number of cities total
+        //* Format: "identifier,num processors,num cities,time(ms)"
+        printf("time_taken_ms,%i,%lf\n", total_tasks, (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6);
+        printf("optimization_time_taken_ms,%i,%lf\n", total_tasks, (1000000000L * (optimizationEnd.tv_sec - optimizationStart.tv_sec) + optimizationEnd.tv_nsec - optimizationStart.tv_nsec) / 1e6);
+    }
+
+    MPI_Finalize();
     return 0;
 }

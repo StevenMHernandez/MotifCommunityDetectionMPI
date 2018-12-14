@@ -7,8 +7,8 @@ public:
     double DISTANCE_THRESHOLD = 10;
     int    POINTS_TO_CREATE = 100;
     int    RAND_POINT_MAX = 100;
-
-    int    TOTAL_PROCESSORS = 1;
+    int    TOTAL_PROCESSORS = -1;
+    int    RANK = -1;
 
     bool __PRINT_RANDOM_POINTS__ = false;
     bool __PRINT_EDGES__         = false;
