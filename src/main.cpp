@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     C.resize(static_cast<unsigned long>(config.POINTS_TO_CREATE), std::set<int>());
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationStart);
-    int **T = collectMotifTransitions(L_t1, L_t2, config);
+    long *T = collectMotifTransitions(L_t1, L_t2, config);
     clock_gettime(CLOCK_MONOTONIC_RAW, &optimizationEnd);
 
     if (rank == 0 && config.__PRINT_TIME_TAKEN__) {

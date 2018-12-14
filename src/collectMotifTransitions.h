@@ -2,30 +2,29 @@
 #include <algorithm>
 #include "Motif.h"
 
-#define MAX_NUMBER_OF_MOTIFS 13
+#define MAX_NUMBER_OF_MOTIFS 8
 
 #define TAG_COLLECT_COUNTS 1
 
 struct Range {
     int min = 0;
     int max = 0;
+    int expected = 0; // inclusive range count
 };
 
-long **r;
-
-void calculateSums(int **T, Range range, Config config) {
+void calculateSums(long **r, long *T, Range range, Config config) {
     for (int a = range.min; a <= range.max; a++) {
         int a_i = a - range.min;
         long s = 0;
         for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
-            s += r[a_i][p];
+            s += r[p][a_i];
         }
+
+        T[a] = s;
 
         if (config.__PRINT_T_COUNTS__) {
-            printf("T_counts,%i,%i,%li\n", config.RANK, a, s);
+            printf("T_counts,%i,%li\n", a_i, s);
         }
-
-//        T[]
     }
 
     // TODO: broadcast T_{i,j}
@@ -68,12 +67,9 @@ Motif *getNextInstanceAsMotif(double **L_t1, double **L_t2, Motif *m_curr) {
     return m_new;
 }
 
-int **collectMotifTransitions(double **L_t1, double **L_t2, Config config) {
+long *collectMotifTransitions(double **L_t1, double **L_t2, Config config) {
     /// Initialize matrix
-    int **T = (int **) malloc(MAX_NUMBER_OF_MOTIFS * sizeof(int *));
-    for (int i = 0; i < MAX_NUMBER_OF_MOTIFS; i++) {
-        T[i] = (int *) calloc(MAX_NUMBER_OF_MOTIFS, sizeof(int *));
-    }
+    long *T = (long *) calloc(MAX_NUMBER_OF_MOTIFS * MAX_NUMBER_OF_MOTIFS + 10, sizeof(long *));
 
     /// Determine ranges of `T` which each processor will be responsible for
     int globalNumRequestsExpected = static_cast<int>(ceil(MAX_NUMBER_OF_MOTIFS * MAX_NUMBER_OF_MOTIFS / config.TOTAL_PROCESSORS));
@@ -83,34 +79,34 @@ int **collectMotifTransitions(double **L_t1, double **L_t2, Config config) {
         T_ranges[p].min = p * globalNumRequestsExpected;
         if (p == config.TOTAL_PROCESSORS - 1) {
             T_ranges[p].max = (MAX_NUMBER_OF_MOTIFS * MAX_NUMBER_OF_MOTIFS) - 1;
-            numRequestsExpected = T_ranges[p].max - T_ranges[p].min;
         } else {
             T_ranges[p].max = ((p + 1) * globalNumRequestsExpected) - 1;
         }
-        int range = T_ranges[p].max - T_ranges[p].min;
-//        printf("p=%i good golly %i, but %i and r=%i\n", p, T_ranges[p].max, globalNumRequestsExpected, range);
+
+        T_ranges[p].expected = (T_ranges[p].max - T_ranges[p].min);
+
+        if (p == config.RANK) {
+            numRequestsExpected = T_ranges[p].expected;
+        }
     }
 
-
     /// Initialize data expected to be collected
-    r = (long **) malloc(numRequestsExpected * sizeof(long *));
-    for (int i = 0; i <= numRequestsExpected; i++) {
-        r[i] = (long *) calloc(static_cast<size_t>(config.TOTAL_PROCESSORS), sizeof(long));
+    long **r;
+    r = (long **) malloc(config.TOTAL_PROCESSORS * sizeof(long *));
+    for (int i = 0; i < config.TOTAL_PROCESSORS; i++) {
+        r[i] = (long *) calloc(static_cast<size_t>(numRequestsExpected), sizeof(long));
     }
 
     /// Initialize Asynchronous MPI Receiving
-    MPI_Request mRequests[numRequestsExpected];
-    MPI_Status mStatuses[numRequestsExpected];
-    for (int a = T_ranges[config.RANK].min; a < T_ranges[config.RANK].max; a++) {
-        for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
-            int ij = a - T_ranges[config.RANK].min;
-            MPI_Irecv(&r[ij][p], a, MPI_INT, p, TAG_COLLECT_COUNTS, MPI_COMM_WORLD, &mRequests[ij]);
-        }
+    MPI_Request mRequests[config.TOTAL_PROCESSORS];
+    MPI_Status mStatuses[config.TOTAL_PROCESSORS];
+    for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
+        MPI_Irecv(r[p], numRequestsExpected, MPI_LONG, p, TAG_COLLECT_COUNTS, MPI_COMM_WORLD, &mRequests[p]);
     }
 
     /// for all v \in G
     Range ran = Range();
-    int ps = ceil(config.POINTS_TO_CREATE / config.TOTAL_PROCESSORS);
+    int ps = static_cast<int>(ceil(config.POINTS_TO_CREATE / config.TOTAL_PROCESSORS));
     ran.min = ps * config.RANK;
     ran.max = (ps * (config.RANK + 1)) - 1;
     if (config.RANK == config.TOTAL_PROCESSORS - 1) {
@@ -122,29 +118,24 @@ int **collectMotifTransitions(double **L_t1, double **L_t2, Config config) {
         m->add(v);
         std::vector<Motif*> M = getSubGraph(config.K - 1, L_t1, m, config);
 
+        /// Count all motif transitions locally
         for (auto m_curr : M) {
             Motif *m_next = getNextInstanceAsMotif(L_t1, L_t2, m_curr);
-            T[m_curr->identifier][m_next->identifier] = T[m_curr->identifier][m_next->identifier] + 1;
-        }
-
-        for (int i = 0; i < MAX_NUMBER_OF_MOTIFS; i++) {
-            for (int j = 0; j < MAX_NUMBER_OF_MOTIFS; j++) {
-                int tag = (MAX_NUMBER_OF_MOTIFS * i) + j;
-                int dest = 0;
-                for (int k = 0; k < config.TOTAL_PROCESSORS; k++) {
-                    if (tag <= T_ranges[k].max && tag >= T_ranges[k].min) {
-                        dest = k;
-                    }
-                }
-
-                //MPI_Send(&T[i][j], 1, MPI_INT, dest, tag, MPI_COMM_WORLD);
-            }
+            int index = (m_curr->identifier * MAX_NUMBER_OF_MOTIFS) + m_next->identifier;
+            T[index] = T[index] + 1;
         }
     }
 
+    /// Send local sums out for global summation
+    for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
+        int count = T_ranges[p].expected;
+        MPI_Send(&T[T_ranges[config.RANK].min], count, MPI_LONG, p, TAG_COLLECT_COUNTS, MPI_COMM_WORLD);
+    }
+
+    MPI_Waitall(config.TOTAL_PROCESSORS, mRequests, mStatuses);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    calculateSums(T, T_ranges[config.RANK], config);
+    calculateSums(r, T, T_ranges[config.RANK], config);
 
     return T;
 }
