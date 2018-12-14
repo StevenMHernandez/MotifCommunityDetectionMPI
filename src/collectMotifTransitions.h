@@ -119,7 +119,8 @@ long *collectMotifTransitions(double **L_t1, double **L_t2, Config config) {
         std::vector<Motif*> M = getSubGraph(config.K - 1, L_t1, m, config);
 
         /// Count all motif transitions locally
-        for (auto m_curr : M) {
+        for (int m = 0; m < M.size(); m++) {
+            Motif *m_curr = M[m];
             Motif *m_next = getNextInstanceAsMotif(L_t1, L_t2, m_curr);
             int index = (m_curr->identifier * MAX_NUMBER_OF_MOTIFS) + m_next->identifier;
             T[index] = T[index] + 1;
