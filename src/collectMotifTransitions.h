@@ -1,42 +1,47 @@
+#include <cstdio>
+#include <algorithm>
 #include "Motif.h"
 
 #define MAX_NUMBER_OF_MOTIFS 13
 
-// TODO: remove this hard coded value, consider handling this differently (with an actual struct!)
+#define TAG_COLLECT_COUNTS 1
 
-int *r = (int *) calloc(Config().TOTAL_PROCESSORS, sizeof(int));
-int r_total = 0;
+struct Range {
+    int min = 0;
+    int max = 0;
+};
 
-void onReceive(int senderId, int T_ij, int i, int j, Config config) {
-    r[senderId] = T_ij;
-    r_total++;
+long **r;
 
-    if (r_total >= config.TOTAL_PROCESSORS) {
-        int s = 0;
-        for (int i = 0; i < config.TOTAL_PROCESSORS; i++) {
-            s += r[i];
+void calculateSums(int **T, Range range, Config config) {
+    for (int a = range.min; a <= range.max; a++) {
+        int a_i = a - range.min;
+        long s = 0;
+        for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
+            s += r[a_i][p];
         }
 
-        // TODO: broadcast T_{i,j}
         if (config.__PRINT_T_COUNTS__) {
-            //* Print counts of transitions from i to j
-            //* Format: "identifier,i,j,num_instances"
-            printf("T_counts,%i,%i,%i\n", i, j, T_ij);
+            printf("T_counts,%i,%i,%li\n", config.RANK, a, s);
         }
+
+//        T[]
     }
+
+    // TODO: broadcast T_{i,j}
 }
 
-std::vector<Motif*> getSubGraph(int k, double **L_t1, Motif *M, Config config) {
+std::vector<Motif *> getSubGraph(int k, double **L_t1, Motif *M, Config config) {
     if (k <= 0) {
         if (M->isLowest) { // Only return those motifs where the first data point has the lowest index
-            std::vector<Motif*> result = std::vector<Motif*>();
+            std::vector<Motif *> result = std::vector<Motif *>();
             result.push_back(M);
             return result;
         } else {
-            return std::vector<Motif*>();
+            return std::vector<Motif *>();
         }
     }
-    std::vector<Motif*> M_all = std::vector<Motif*>();
+    std::vector<Motif *> M_all = std::vector<Motif *>();
 
     // for all neighbors, n
     for (int m = 0; m < M->count; m++) {
@@ -44,7 +49,7 @@ std::vector<Motif*> getSubGraph(int k, double **L_t1, Motif *M, Config config) {
             if (L_t1[m][n] > 0 && !M->contains(n)) {
                 Motif *M_copy2 = M->copy();
                 M_copy2->add(n);
-                std::vector<Motif*> M_all_sub = getSubGraph(k - 1, L_t1, M_copy2, config);
+                std::vector<Motif *> M_all_sub = getSubGraph(k - 1, L_t1, M_copy2, config);
                 M_all.insert(M_all.end(), M_all_sub.begin(), M_all_sub.end());
             }
         }
@@ -70,25 +75,76 @@ int **collectMotifTransitions(double **L_t1, double **L_t2, Config config) {
         T[i] = (int *) calloc(MAX_NUMBER_OF_MOTIFS, sizeof(int *));
     }
 
+    /// Determine ranges of `T` which each processor will be responsible for
+    int globalNumRequestsExpected = static_cast<int>(ceil(MAX_NUMBER_OF_MOTIFS * MAX_NUMBER_OF_MOTIFS / config.TOTAL_PROCESSORS));
+    int numRequestsExpected = globalNumRequestsExpected;
+    Range T_ranges[config.TOTAL_PROCESSORS];
+    for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
+        T_ranges[p].min = p * globalNumRequestsExpected;
+        if (p == config.TOTAL_PROCESSORS - 1) {
+            T_ranges[p].max = (MAX_NUMBER_OF_MOTIFS * MAX_NUMBER_OF_MOTIFS) - 1;
+            numRequestsExpected = T_ranges[p].max - T_ranges[p].min;
+        } else {
+            T_ranges[p].max = ((p + 1) * globalNumRequestsExpected) - 1;
+        }
+        int range = T_ranges[p].max - T_ranges[p].min;
+//        printf("p=%i good golly %i, but %i and r=%i\n", p, T_ranges[p].max, globalNumRequestsExpected, range);
+    }
+
+
+    /// Initialize data expected to be collected
+    r = (long **) malloc(numRequestsExpected * sizeof(long *));
+    for (int i = 0; i <= numRequestsExpected; i++) {
+        r[i] = (long *) calloc(static_cast<size_t>(config.TOTAL_PROCESSORS), sizeof(long));
+    }
+
+    /// Initialize Asynchronous MPI Receiving
+    MPI_Request mRequests[numRequestsExpected];
+    MPI_Status mStatuses[numRequestsExpected];
+    for (int a = T_ranges[config.RANK].min; a < T_ranges[config.RANK].max; a++) {
+        for (int p = 0; p < config.TOTAL_PROCESSORS; p++) {
+            int ij = a - T_ranges[config.RANK].min;
+            MPI_Irecv(&r[ij][p], a, MPI_INT, p, TAG_COLLECT_COUNTS, MPI_COMM_WORLD, &mRequests[ij]);
+        }
+    }
+
     /// for all v \in G
-    for (int v = 0; v < config.POINTS_TO_CREATE; v++) {
+    Range ran = Range();
+    int ps = ceil(config.POINTS_TO_CREATE / config.TOTAL_PROCESSORS);
+    ran.min = ps * config.RANK;
+    ran.max = (ps * (config.RANK + 1)) - 1;
+    if (config.RANK == config.TOTAL_PROCESSORS - 1) {
+        ran.max = std::min(ran.max, config.POINTS_TO_CREATE);
+    }
+
+    for (int v = ran.min; v < ran.max; v++) {
         Motif *m = new Motif(L_t1);
         m->add(v);
         std::vector<Motif*> M = getSubGraph(config.K - 1, L_t1, m, config);
 
-        for (int m = 0; m < M.size(); m++) {
-            Motif *m_curr = M[m];
+        for (auto m_curr : M) {
             Motif *m_next = getNextInstanceAsMotif(L_t1, L_t2, m_curr);
             T[m_curr->identifier][m_next->identifier] = T[m_curr->identifier][m_next->identifier] + 1;
         }
 
         for (int i = 0; i < MAX_NUMBER_OF_MOTIFS; i++) {
             for (int j = 0; j < MAX_NUMBER_OF_MOTIFS; j++) {
-                // TODO: send to specific processors!
-                onReceive(0, T[i][j], i, j, config);// TODO: remove
+                int tag = (MAX_NUMBER_OF_MOTIFS * i) + j;
+                int dest = 0;
+                for (int k = 0; k < config.TOTAL_PROCESSORS; k++) {
+                    if (tag <= T_ranges[k].max && tag >= T_ranges[k].min) {
+                        dest = k;
+                    }
+                }
+
+                //MPI_Send(&T[i][j], 1, MPI_INT, dest, tag, MPI_COMM_WORLD);
             }
         }
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    calculateSums(T, T_ranges[config.RANK], config);
 
     return T;
 }

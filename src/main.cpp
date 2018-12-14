@@ -61,9 +61,9 @@ int main(int argc, char *argv[]) {
     if (rank == 0 && config.__PRINT_TIME_TAKEN__) {
         clock_gettime(CLOCK_MONOTONIC_RAW, &end);
         //* Print the time take for the given number of processors used and number of cities total
-        //* Format: "identifier,num processors,num cities,time(ms)"
-        printf("time_taken_ms,%i,%lf\n", total_tasks, (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6);
-        printf("optimization_time_taken_ms,%i,%lf\n", total_tasks, (1000000000L * (optimizationEnd.tv_sec - optimizationStart.tv_sec) + optimizationEnd.tv_nsec - optimizationStart.tv_nsec) / 1e6);
+        //* Format: "identifier,num processors,num points,time(ms)"
+        printf("time_taken_ms,%i,%i,%lf\n", total_tasks, config.POINTS_TO_CREATE, (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6);
+        printf("optimization_time_taken_ms,%i,%i,%lf\n", total_tasks, config.POINTS_TO_CREATE, (1000000000L * (optimizationEnd.tv_sec - optimizationStart.tv_sec) + optimizationEnd.tv_nsec - optimizationStart.tv_nsec) / 1e6);
     }
 
     MPI_Finalize();
